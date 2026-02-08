@@ -843,13 +843,15 @@ pub const ShinyDbClient = struct {
                 if (reply.status != .ok) {
                     std.debug.print("Create operation failed with status: {any}\n", .{reply.status});
                     if (reply.data) |data| {
-                        std.debug.print("Error data: {s}\n", .{data});
+                        std.debug.print("Server error: {s}\n", .{data});
+                    } else {
+                        std.debug.print("No error details provided by server\n", .{});
                     }
                     return ClientError.InvalidResponse;
                 }
             },
             else => {
-                std.debug.print("Received non-Reply packet: {any}\n", .{packet.op});
+                std.debug.print("Received unexpected packet type: {any}\n", .{packet.op});
                 return ClientError.InvalidResponse;
             },
         }
