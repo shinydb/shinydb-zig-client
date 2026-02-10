@@ -14,7 +14,7 @@ pub const CircuitBreaker = struct {
     success_threshold: u32, // Successes in half-open before closing
     timeout_ms: u32, // Time to wait before trying half-open
 
-    const State = enum {
+    pub const State = enum {
         closed, // Normal operation
         open, // Too many failures, reject requests immediately
         half_open, // Testing if service recovered

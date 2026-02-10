@@ -333,15 +333,15 @@ pub const Query = struct {
                     proto.Packet.free(self.allocator, packet);
                     return error.OperationFailed;
                 }
-                // Transfer ownership of data to QueryResponse
-                const result = QueryResponse{
-                    .success = true,
-                    .data = reply.data,
-                    .count = 1,
-                };
-                // Free packet but keep data
+                // Dupe data before freeing packet (reply.data is a slice into packet memory)
+                const duped = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
                 proto.Packet.free(self.allocator, packet);
-                break :blk result;
+                break :blk QueryResponse{
+                    .success = true,
+                    .data = duped,
+                    .count = 1,
+                    .allocator = self.allocator,
+                };
             },
             else => {
                 proto.Packet.free(self.allocator, packet);
@@ -367,15 +367,15 @@ pub const Query = struct {
                     proto.Packet.free(self.allocator, packet);
                     return error.DocumentNotFound;
                 }
-                // Transfer ownership of data to QueryResponse
-                const result = QueryResponse{
-                    .success = true,
-                    .data = reply.data,
-                    .count = 1,
-                };
-                // Free packet but keep data
+                // Dupe data before freeing packet (reply.data is a slice into packet memory)
+                const duped = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
                 proto.Packet.free(self.allocator, packet);
-                break :blk result;
+                break :blk QueryResponse{
+                    .success = true,
+                    .data = duped,
+                    .count = 1,
+                    .allocator = self.allocator,
+                };
             },
             else => {
                 proto.Packet.free(self.allocator, packet);
@@ -459,13 +459,15 @@ pub const Query = struct {
                     proto.Packet.free(self.allocator, packet);
                     return error.QueryFailed;
                 }
-                const result = QueryResponse{
-                    .success = true,
-                    .data = reply.data,
-                    .count = 0, // TODO: parse count from response
-                };
+                // Dupe data before freeing packet (reply.data is a slice into packet memory)
+                const duped = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
                 proto.Packet.free(self.allocator, packet);
-                break :blk result;
+                break :blk QueryResponse{
+                    .success = true,
+                    .data = duped,
+                    .count = 0,
+                    .allocator = self.allocator,
+                };
             },
             else => {
                 proto.Packet.free(self.allocator, packet);
@@ -495,13 +497,15 @@ pub const Query = struct {
                     proto.Packet.free(self.allocator, packet);
                     return error.AggregateFailed;
                 }
-                const result = QueryResponse{
-                    .success = true,
-                    .data = reply.data,
-                    .count = 0,
-                };
+                // Dupe data before freeing packet (reply.data is a slice into packet memory)
+                const duped = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
                 proto.Packet.free(self.allocator, packet);
-                break :blk result;
+                break :blk QueryResponse{
+                    .success = true,
+                    .data = duped,
+                    .count = 0,
+                    .allocator = self.allocator,
+                };
             },
             else => {
                 proto.Packet.free(self.allocator, packet);
@@ -532,13 +536,15 @@ pub const Query = struct {
                     proto.Packet.free(self.allocator, packet);
                     return error.ScanFailed;
                 }
-                const result = QueryResponse{
-                    .success = true,
-                    .data = reply.data,
-                    .count = 0,
-                };
+                // Dupe data before freeing packet (reply.data is a slice into packet memory)
+                const duped = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
                 proto.Packet.free(self.allocator, packet);
-                break :blk result;
+                break :blk QueryResponse{
+                    .success = true,
+                    .data = duped,
+                    .count = 0,
+                    .allocator = self.allocator,
+                };
             },
             else => {
                 proto.Packet.free(self.allocator, packet);

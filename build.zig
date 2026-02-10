@@ -152,7 +152,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "yadb_zig_client", .module = mod },
+                .{ .name = "shinydb_zig_client", .module = mod },
                 .{ .name = "proto", .module = proto.module("proto") },
                 .{ .name = "bson", .module = bson.module("bson") },
             },
@@ -162,13 +162,44 @@ pub fn build(b: *std.Build) void {
     // A run step for integration tests
     const run_integration_tests = b.addRunArtifact(integration_tests);
 
-    // A top level step for running all tests. dependOn can be called multiple
-    // times and since the two run steps do not depend on one another, this will
-    // make the two of them run in parallel.
-    const test_step = b.step("test", "Run tests");
+    // Builder unit tests (tests/builder_test.zig)
+    const builder_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/builder_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "shinydb_zig_client", .module = mod },
+                .{ .name = "proto", .module = proto.module("proto") },
+            },
+        }),
+    });
+    const run_builder_tests = b.addRunArtifact(builder_tests);
+
+    // Client unit tests (tests/client_test.zig)
+    const client_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/client_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "shinydb_zig_client", .module = mod },
+            },
+        }),
+    });
+    const run_client_tests = b.addRunArtifact(client_tests);
+
+    // Unit tests — run with: zig build test
+    const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
-    test_step.dependOn(&run_integration_tests.step);
+    test_step.dependOn(&run_builder_tests.step);
+    test_step.dependOn(&run_client_tests.step);
+
+    // Integration tests — run with: zig build test-integration
+    // Requires a running ShinyDB server at 127.0.0.1:23469 with sales data loaded
+    const integration_step = b.step("test-integration", "Run integration tests (requires running server)");
+    integration_step.dependOn(&run_integration_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

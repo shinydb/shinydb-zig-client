@@ -1011,3 +1011,68 @@ fn parseAuthResult(allocator: std.mem.Allocator, data: []const u8) !ShinyDbClien
 
     return result;
 }
+
+// ============================================================================
+// Unit Tests (inline for non-pub functions)
+// ============================================================================
+
+test "parseAuthResult — valid JSON with all fields" {
+    const allocator = std.testing.allocator;
+    const data = "{\"session_id\":\"sess_abc123\",\"api_key\":\"key_xyz789\",\"username\":\"admin_user\",\"role\":\"admin\"}";
+
+    var result = try parseAuthResult(allocator, data);
+    defer result.deinit();
+
+    try std.testing.expectEqualStrings("sess_abc123", result.session_id);
+    try std.testing.expectEqualStrings("key_xyz789", result.api_key);
+    try std.testing.expectEqualStrings("admin_user", result.username);
+    try std.testing.expectEqual(ShinyDbClient.Role.admin, result.role);
+}
+
+test "parseAuthResult — read_only role" {
+    const allocator = std.testing.allocator;
+    const data = "{\"session_id\":\"s1\",\"api_key\":\"k1\",\"username\":\"viewer\",\"role\":\"read_only\"}";
+
+    var result = try parseAuthResult(allocator, data);
+    defer result.deinit();
+
+    try std.testing.expectEqualStrings("viewer", result.username);
+    try std.testing.expectEqual(ShinyDbClient.Role.read_only, result.role);
+}
+
+test "parseAuthResult — partial JSON (missing fields)" {
+    const allocator = std.testing.allocator;
+    const data = "{\"username\":\"testuser\",\"role\":\"read_write\"}";
+
+    var result = try parseAuthResult(allocator, data);
+    defer result.deinit();
+
+    // session_id and api_key should be empty slices (not allocated)
+    try std.testing.expectEqual(@as(usize, 0), result.session_id.len);
+    try std.testing.expectEqual(@as(usize, 0), result.api_key.len);
+    try std.testing.expectEqualStrings("testuser", result.username);
+    try std.testing.expectEqual(ShinyDbClient.Role.read_write, result.role);
+}
+
+test "parseBackupMetadata — valid JSON" {
+    const allocator = std.testing.allocator;
+    const data = "{\"backup_path\":\"/backups/db_20240101\",\"timestamp\":1704067200,\"size_bytes\":1048576,\"vlog_count\":3,\"entry_count\":50000}";
+
+    var result = try parseBackupMetadata(allocator, data);
+    defer result.deinit();
+
+    try std.testing.expectEqualStrings("/backups/db_20240101", result.backup_path);
+    try std.testing.expectEqual(@as(i64, 1704067200), result.timestamp);
+    try std.testing.expectEqual(@as(u64, 1048576), result.size_bytes);
+    try std.testing.expectEqual(@as(u16, 3), result.vlog_count);
+    try std.testing.expectEqual(@as(u64, 50000), result.entry_count);
+}
+
+test "parseBackupMetadata — missing field returns error" {
+    const allocator = std.testing.allocator;
+    // Missing backup_path field
+    const data = "{\"timestamp\":123,\"size_bytes\":456}";
+
+    const result = parseBackupMetadata(allocator, data);
+    try std.testing.expectError(error.InvalidResponse, result);
+}

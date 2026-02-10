@@ -61,6 +61,12 @@ pub const Index = proto.Index;
 pub const User = proto.User;
 pub const Backup = proto.Backup;
 
+// Re-export resilience/config types for testing
+pub const RetryPolicy = @import("retry_policy.zig").RetryPolicy;
+pub const CircuitBreaker = @import("circuit_breaker.zig").CircuitBreaker;
+pub const TimeoutConfig = @import("timeout_config.zig").TimeoutConfig;
+pub const client_error = @import("client_error.zig");
+
 // YQL (shinydb Query Language)
 pub const yql = @import("yql/mod.zig");
 pub const ast = @import("yql/ast.zig");
