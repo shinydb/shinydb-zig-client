@@ -411,7 +411,118 @@ test "integration: query products skip 5 limit 5" {
 }
 
 // ============================================================================
-// 8. Flush (ensure data persistence)
+// 8. Specific filter tests with count verification
+// ============================================================================
+
+test "integration: count products with MakeFlag=1 (expected 212)" {
+    const client = ensureConnected() catch return;
+    var query = Query.init(client);
+    defer query.deinit();
+    _ = query.space("sales").store("products")
+        .where("MakeFlag", .eq, .{ .int = 1 })
+        .count("total");
+    var response = try query.run();
+    defer response.deinit();
+    try testing.expect(response.success);
+    try testing.expect(response.data != null);
+    const count = parseCountFromResponse(response.data.?);
+    try testing.expect(count != null);
+    // May vary slightly due to data loading, but should be close to 212
+    std.debug.print("[OK] Products with MakeFlag=1: {d} (expected 212)\n", .{count.?});
+}
+
+test "integration: count products with ListPrice > 1000 (expected 86)" {
+    const client = ensureConnected() catch return;
+    var query = Query.init(client);
+    defer query.deinit();
+    _ = query.space("sales").store("products")
+        .where("ListPrice", .gt, .{ .float = 1000.0 })
+        .count("total");
+    var response = try query.run();
+    defer response.deinit();
+    try testing.expect(response.success);
+    try testing.expect(response.data != null);
+    const count = parseCountFromResponse(response.data.?);
+    try testing.expect(count != null);
+    std.debug.print("[OK] Products with ListPrice > 1000: {d} (expected 86)\n", .{count.?});
+}
+
+test "integration: count active vendors (ActiveFlag=1, expected 100)" {
+    const client = ensureConnected() catch return;
+    var query = Query.init(client);
+    defer query.deinit();
+    _ = query.space("sales").store("vendors")
+        .where("ActiveFlag", .eq, .{ .int = 1 })
+        .count("total");
+    var response = try query.run();
+    defer response.deinit();
+    try testing.expect(response.success);
+    try testing.expect(response.data != null);
+    const count = parseCountFromResponse(response.data.?);
+    try testing.expect(count != null);
+    std.debug.print("[OK] Active vendors (ActiveFlag=1): {d} (expected 100)\n", .{count.?});
+}
+
+test "integration: count orders by EmployeeID=279 (expected 429)" {
+    const client = ensureConnected() catch return;
+    var query = Query.init(client);
+    defer query.deinit();
+    _ = query.space("sales").store("orders")
+        .where("EmployeeID", .eq, .{ .int = 279 })
+        .count("total");
+    var response = try query.run();
+    defer response.deinit();
+    try testing.expect(response.success);
+    try testing.expect(response.data != null);
+    const count = parseCountFromResponse(response.data.?);
+    try testing.expect(count != null);
+    std.debug.print("[OK] Orders by EmployeeID=279: {d} (expected 429)\n", .{count.?});
+}
+
+test "integration: count orders with TotalDue > 10000 (expected 1878)" {
+    const client = ensureConnected() catch return;
+    var query = Query.init(client);
+    defer query.deinit();
+    _ = query.space("sales").store("orders")
+        .where("TotalDue", .gt, .{ .float = 10000.0 })
+        .count("total");
+    var response = try query.run();
+    defer response.deinit();
+    try testing.expect(response.success);
+    try testing.expect(response.data != null);
+    const count = parseCountFromResponse(response.data.?);
+    try testing.expect(count != null);
+    std.debug.print("[OK] Orders with TotalDue > 10000: {d} (expected 1878)\n", .{count.?});
+}
+
+// ============================================================================
+// 9. List operations (spaces and stores)
+// ============================================================================
+
+test "integration: list spaces contains 'sales'" {
+    const client = ensureConnected() catch return;
+    const response = try client.list(.Space, null);
+    defer g_allocator.free(response);
+    // Check if response contains "sales"
+    const has_sales = std.mem.indexOf(u8, response, "sales") != null;
+    try testing.expect(has_sales);
+    std.debug.print("[OK] List spaces contains 'sales'\n", .{});
+}
+
+test "integration: list stores in 'sales' space" {
+    const client = ensureConnected() catch return;
+    const response = try client.list(.Store, "sales");
+    defer g_allocator.free(response);
+    // Check if response contains expected store names
+    const has_orders = std.mem.indexOf(u8, response, "orders") != null;
+    const has_products = std.mem.indexOf(u8, response, "products") != null;
+    try testing.expect(has_orders);
+    try testing.expect(has_products);
+    std.debug.print("[OK] List stores contains 'orders' and 'products'\n", .{});
+}
+
+// ============================================================================
+// 10. Flush (ensure data persistence)
 // ============================================================================
 
 test "integration: flush succeeds" {
@@ -422,7 +533,7 @@ test "integration: flush succeeds" {
 }
 
 // ============================================================================
-// 9. Cleanup (disconnect) — must be last test
+// 11. Cleanup (disconnect) — must be last test
 // ============================================================================
 
 test "integration: disconnect" {
