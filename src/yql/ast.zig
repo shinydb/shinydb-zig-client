@@ -254,15 +254,39 @@ pub const QueryAST = struct {
         var first = true;
 
         // Filters (always include, even if empty - server expects this field)
+        // Merge multiple operators on the same field into one JSON object, e.g.:
+        //   EmployeeID >= 285 AND EmployeeID <= 287 → {"EmployeeID":{"$gte":285,"$lte":287}}
         if (!first) try buf.append(allocator, ',');
         first = false;
         try buf.appendSlice(allocator, "\"filter\":{");
-        for (self.filters.items, 0..) |filter, i| {
-            if (i > 0) try buf.append(allocator, ',');
-            try appendFmt(allocator, &buf, "\"{s}\":{{", .{filter.field});
-            try appendFmt(allocator, &buf, "\"{s}\":", .{filter.op.toJsonOp()});
-            try filter.value.formatTo(allocator, &buf);
-            try buf.append(allocator, '}');
+        {
+            // Collect unique field names in order
+            var field_order: ArrayList([]const u8) = .empty;
+            defer field_order.deinit(allocator);
+            for (self.filters.items) |filter| {
+                var found = false;
+                for (field_order.items) |existing| {
+                    if (std.mem.eql(u8, existing, filter.field)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) try field_order.append(allocator, filter.field);
+            }
+
+            for (field_order.items, 0..) |field_name, fi| {
+                if (fi > 0) try buf.append(allocator, ',');
+                try appendFmt(allocator, &buf, "\"{s}\":{{", .{field_name});
+                var op_first = true;
+                for (self.filters.items) |filter| {
+                    if (!std.mem.eql(u8, filter.field, field_name)) continue;
+                    if (!op_first) try buf.append(allocator, ',');
+                    op_first = false;
+                    try appendFmt(allocator, &buf, "\"{s}\":", .{filter.op.toJsonOp()});
+                    try filter.value.formatTo(allocator, &buf);
+                }
+                try buf.append(allocator, '}');
+            }
         }
         try buf.append(allocator, '}');
 
@@ -333,6 +357,13 @@ pub const QueryAST = struct {
                 }
                 try buf.append(allocator, '}');
             }
+        }
+
+        // Count only
+        if (self.query_type == .count) {
+            if (!first) try buf.append(allocator, ',');
+            first = false;
+            try buf.appendSlice(allocator, "\"count\":true");
         }
 
         // Mutation (insert/update/delete)

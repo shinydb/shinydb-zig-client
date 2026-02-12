@@ -117,6 +117,13 @@ pub const Parser = struct {
 
     /// Parse a single operation in the chain
     fn parseOperation(self: *Parser, query_ast: *QueryAST) ParseError!void {
+        // Handle keywords that are also operation names (e.g. count)
+        if (self.current.type == .kw_count) {
+            self.advance();
+            try self.parseCountOp(query_ast);
+            return;
+        }
+
         const op_name = try self.expectIdentifier();
 
         if (std.mem.eql(u8, op_name, "filter")) {
@@ -542,9 +549,9 @@ pub const Parser = struct {
 
 fn isOperation(name: []const u8) bool {
     const ops = [_][]const u8{
-        "filter",  "pluck",  "orderBy", "limit",    "skip",
-        "groupBy", "aggregate", "insert", "set",      "delete",
-        "count",   "get",    "exists",
+        "filter",  "pluck",     "orderBy", "limit", "skip",
+        "groupBy", "aggregate", "insert",  "set",   "delete",
+        "count",   "get",       "exists",
     };
     for (ops) |op| {
         if (std.mem.eql(u8, name, op)) return true;

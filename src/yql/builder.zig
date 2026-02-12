@@ -235,6 +235,12 @@ pub const Query = struct {
         return self.aggregate(name, .max, field);
     }
 
+    /// Set query to count-only mode (returns count instead of documents)
+    pub fn countOnly(self: *Query) *Query {
+        self.ast.query_type = .count;
+        return self;
+    }
+
     fn aggregate(self: *Query, name: []const u8, func: AggFunc, field: ?[]const u8) *Query {
         if (self.ast.aggregations == null) {
             self.ast.aggregations = .empty;
