@@ -911,6 +911,25 @@ pub const ShinyDbClient = struct {
             },
         };
     }
+
+    /// Shutdown the database server
+    /// This sends a shutdown command to the server and the connection will be closed
+    pub fn shutdown(self: *Self) !void {
+        const op = proto.Operation.Shutdown;
+
+        const packet = try self.doOperation(op);
+        defer Packet.free(self.allocator, packet);
+
+        switch (packet.op) {
+            .Reply => |reply| {
+                if (reply.status != .ok) {
+                    return ClientError.ServerError;
+                }
+                // Server shutdown initiated successfully
+            },
+            else => return ClientError.InvalidResponse,
+        }
+    }
 };
 
 /// Parse backup metadata from JSON response
