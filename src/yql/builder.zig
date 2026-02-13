@@ -180,9 +180,12 @@ pub const Query = struct {
 
     // --- Query Modifiers ---
 
-    /// Set order by field and direction (.asc or .desc)
+    /// Set order by field and direction (.asc or .desc). Chainable for multi-field sort.
     pub fn orderBy(self: *Query, field: []const u8, direction: OrderDir) *Query {
-        self.ast.order_by = .{ .field = field, .direction = direction };
+        if (self.ast.order_by == null) {
+            self.ast.order_by = .empty;
+        }
+        self.ast.order_by.?.append(self.allocator, .{ .field = field, .direction = direction }) catch {};
         return self;
     }
 

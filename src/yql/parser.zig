@@ -200,26 +200,34 @@ pub const Parser = struct {
     }
 
     fn parseFieldPath(self: *Parser) ParseError![]const u8 {
-        // Support nested fields: address.city
-        const field = try self.expectIdentifier();
+        // Support nested fields: address.city, address.city.zip
+        // Returns a slice of the original source encompassing "field.sub.sub..."
+        var field = try self.expectIdentifier();
 
-        // Check for nested path
+        // Extend field to include dot-separated sub-fields
         while (self.check(.dot)) {
             const saved = self.current;
-            self.advance();
+            self.advance(); // consume dot
 
             if (self.check(.identifier)) {
-                // Check if next is an operator (end of field path)
-                const next = self.current;
-                if (next.isOperator() or next.type == .kw_and or next.type == .kw_or) {
-                    self.current = saved;
-                    break;
-                }
-                // Continue building path (allocator needed for real impl)
-                // For now, just return the first part
-                self.current = saved;
-                break;
+                const next_part = self.current.text;
+                // Peek ahead: if this identifier is followed by an operator
+                // or keyword (and/or), it IS part of the field path.
+                // If followed by '(' it's a chained operation, so stop.
+                const after_saved = self.current;
+                _ = after_saved;
+
+                // The next_part is a valid sub-field. Use pointer arithmetic
+                // to extend the field slice to cover "field.sub" since both
+                // are slices into the same source buffer.
+                const start = field.ptr;
+                const end_ptr = next_part.ptr + next_part.len;
+                const combined_len = @intFromPtr(end_ptr) - @intFromPtr(start);
+                field = start[0..combined_len];
+
+                self.advance(); // consume the sub-field identifier
             } else {
+                // Dot not followed by identifier — restore and stop
                 self.current = saved;
                 break;
             }
@@ -241,6 +249,7 @@ pub const Parser = struct {
             .tilde => .regex,
             .kw_in => .in,
             .kw_contains => .contains,
+            .kw_starts_with => .starts_with,
             .kw_exists => .exists,
             else => null,
         };
@@ -284,6 +293,26 @@ pub const Parser = struct {
                 self.advance();
                 return .null;
             },
+            .lbracket => {
+                self.advance();
+                var items: ArrayList(Value) = .empty;
+                errdefer items.deinit(self.allocator);
+
+                if (!self.check(.rbracket)) {
+                    const first = try self.parseValue();
+                    items.append(self.allocator, first) catch return ParseError.OutOfMemory;
+
+                    while (self.check(.comma)) {
+                        self.advance();
+                        const item = try self.parseValue();
+                        items.append(self.allocator, item) catch return ParseError.OutOfMemory;
+                    }
+                }
+
+                try self.expectToken(.rbracket);
+                const slice = items.toOwnedSlice(self.allocator) catch return ParseError.OutOfMemory;
+                return .{ .array = slice };
+            },
             else => return ParseError.ExpectedValue,
         }
     }
@@ -294,13 +323,13 @@ pub const Parser = struct {
         var projection: ArrayList([]const u8) = .empty;
         errdefer projection.deinit(self.allocator);
 
-        // Parse field list
-        const first = try self.expectIdentifier();
+        // Parse field list (supports dot notation: address.city)
+        const first = try self.parseFieldPath();
         projection.append(self.allocator, first) catch return ParseError.OutOfMemory;
 
         while (self.check(.comma)) {
             self.advance();
-            const field = try self.expectIdentifier();
+            const field = try self.parseFieldPath();
             projection.append(self.allocator, field) catch return ParseError.OutOfMemory;
         }
 
@@ -312,7 +341,7 @@ pub const Parser = struct {
     fn parseOrderByOp(self: *Parser, query_ast: *QueryAST) ParseError!void {
         try self.expectToken(.lparen);
 
-        const field = try self.expectIdentifier();
+        const field = try self.parseFieldPath();
         var direction: OrderDir = .asc;
 
         if (self.check(.comma)) {
@@ -330,10 +359,13 @@ pub const Parser = struct {
 
         try self.expectToken(.rparen);
 
-        query_ast.order_by = .{
+        if (query_ast.order_by == null) {
+            query_ast.order_by = .empty;
+        }
+        query_ast.order_by.?.append(self.allocator, .{
             .field = field,
             .direction = direction,
-        };
+        }) catch return ParseError.OutOfMemory;
     }
 
     fn parseLimitOp(self: *Parser, query_ast: *QueryAST) ParseError!void {
@@ -370,12 +402,12 @@ pub const Parser = struct {
         var group_by: ArrayList([]const u8) = .empty;
         errdefer group_by.deinit(self.allocator);
 
-        const first = try self.expectIdentifier();
+        const first = try self.parseFieldPath();
         group_by.append(self.allocator, first) catch return ParseError.OutOfMemory;
 
         while (self.check(.comma)) {
             self.advance();
-            const field = try self.expectIdentifier();
+            const field = try self.parseFieldPath();
             group_by.append(self.allocator, field) catch return ParseError.OutOfMemory;
         }
 

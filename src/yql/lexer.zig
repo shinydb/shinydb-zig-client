@@ -31,6 +31,7 @@ pub const TokenType = enum {
     kw_not,
     kw_in,
     kw_contains,
+    kw_starts_with,
     kw_exists,
     kw_true,
     kw_false,
@@ -57,7 +58,7 @@ pub const Token = struct {
 
     pub fn isKeyword(self: Token) bool {
         return switch (self.type) {
-            .kw_and, .kw_or, .kw_not, .kw_in, .kw_contains, .kw_exists, .kw_true, .kw_false, .kw_null, .kw_asc, .kw_desc, .kw_count, .kw_sum, .kw_avg, .kw_min, .kw_max => true,
+            .kw_and, .kw_or, .kw_not, .kw_in, .kw_contains, .kw_starts_with, .kw_exists, .kw_true, .kw_false, .kw_null, .kw_asc, .kw_desc, .kw_count, .kw_sum, .kw_avg, .kw_min, .kw_max => true,
             else => false,
         };
     }
@@ -301,6 +302,7 @@ fn identifierType(text: []const u8) TokenType {
     if (std.mem.eql(u8, text, "not")) return .kw_not;
     if (std.mem.eql(u8, text, "in")) return .kw_in;
     if (std.mem.eql(u8, text, "contains")) return .kw_contains;
+    if (std.mem.eql(u8, text, "startsWith")) return .kw_starts_with;
     if (std.mem.eql(u8, text, "exists")) return .kw_exists;
     if (std.mem.eql(u8, text, "true")) return .kw_true;
     if (std.mem.eql(u8, text, "false")) return .kw_false;

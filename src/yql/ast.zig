@@ -64,7 +64,8 @@ pub const FilterOp = enum {
     lte, // <=
     regex, // ~ (regex match)
     in, // in (value in array)
-    contains, // contains (array contains value)
+    contains, // contains (string contains substring)
+    starts_with, // string starts with prefix
     exists, // field exists
 
     pub fn toJsonOp(self: FilterOp) []const u8 {
@@ -78,6 +79,7 @@ pub const FilterOp = enum {
             .regex => "$regex",
             .in => "$in",
             .contains => "$contains",
+            .starts_with => "$startsWith",
             .exists => "$exists",
         };
     }
@@ -92,6 +94,7 @@ pub const FilterOp = enum {
         if (std.mem.eql(u8, s, "~")) return .regex;
         if (std.mem.eql(u8, s, "in")) return .in;
         if (std.mem.eql(u8, s, "contains")) return .contains;
+        if (std.mem.eql(u8, s, "startsWith")) return .starts_with;
         if (std.mem.eql(u8, s, "exists")) return .exists;
         return null;
     }
@@ -198,7 +201,7 @@ pub const QueryAST = struct {
     // Query operations (Zig 0.16: use .empty, pass allocator to methods)
     filters: ArrayList(FilterExpr) = .empty,
     projection: ?ArrayList([]const u8) = null,
-    order_by: ?OrderByExpr = null,
+    order_by: ?ArrayList(OrderByExpr) = null,
     limit_val: ?u32 = null,
     skip_val: ?u32 = null,
     group_by: ?ArrayList([]const u8) = null,
@@ -217,6 +220,7 @@ pub const QueryAST = struct {
     pub fn deinit(self: *QueryAST) void {
         self.filters.deinit(self.allocator);
         if (self.projection) |*p| p.deinit(self.allocator);
+        if (self.order_by) |*o| o.deinit(self.allocator);
         if (self.group_by) |*g| g.deinit(self.allocator);
         if (self.aggregations) |*a| a.deinit(self.allocator);
         // Free mutation payload if present
@@ -254,41 +258,52 @@ pub const QueryAST = struct {
         var first = true;
 
         // Filters (always include, even if empty - server expects this field)
-        // Merge multiple operators on the same field into one JSON object, e.g.:
-        //   EmployeeID >= 285 AND EmployeeID <= 287 → {"EmployeeID":{"$gte":285,"$lte":287}}
         if (!first) try buf.append(allocator, ',');
         first = false;
-        try buf.appendSlice(allocator, "\"filter\":{");
-        {
-            // Collect unique field names in order
-            var field_order: ArrayList([]const u8) = .empty;
-            defer field_order.deinit(allocator);
-            for (self.filters.items) |filter| {
-                var found = false;
-                for (field_order.items) |existing| {
-                    if (std.mem.eql(u8, existing, filter.field)) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) try field_order.append(allocator, filter.field);
-            }
 
-            for (field_order.items, 0..) |field_name, fi| {
-                if (fi > 0) try buf.append(allocator, ',');
-                try appendFmt(allocator, &buf, "\"{s}\":{{", .{field_name});
-                var op_first = true;
-                for (self.filters.items) |filter| {
-                    if (!std.mem.eql(u8, filter.field, field_name)) continue;
-                    if (!op_first) try buf.append(allocator, ',');
-                    op_first = false;
-                    try appendFmt(allocator, &buf, "\"{s}\":", .{filter.op.toJsonOp()});
-                    try filter.value.formatTo(allocator, &buf);
-                }
-                try buf.append(allocator, '}');
+        // Check if any filter uses OR logic
+        var has_or = false;
+        for (self.filters.items) |filter| {
+            if (filter.logic == .@"or") {
+                has_or = true;
+                break;
             }
         }
-        try buf.append(allocator, '}');
+
+        if (has_or and self.filters.items.len > 0) {
+            // Compound mode: split filters into groups at OR boundaries
+            // Each group is AND'd together, groups are OR'd
+            // e.g.: A and B or C and D → $or: [{A, B}, {C, D}]
+            try buf.appendSlice(allocator, "\"filter\":{\"$or\":[");
+
+            var group_start: usize = 0;
+            var group_idx: usize = 0;
+            var i: usize = 0;
+            while (i <= self.filters.items.len) {
+                // Emit a group when we hit an OR boundary or end of list
+                const at_end = i == self.filters.items.len;
+                const at_or = !at_end and i > 0 and self.filters.items[i - 1].logic == .@"or";
+
+                if ((at_or or at_end) and i > group_start) {
+                    if (group_idx > 0) try buf.append(allocator, ',');
+                    group_idx += 1;
+                    try buf.append(allocator, '{');
+                    try serializeFilterGroup(allocator, &buf, self.filters.items[group_start..i]);
+                    try buf.append(allocator, '}');
+                    group_start = i;
+                }
+                i += 1;
+            }
+
+            try buf.appendSlice(allocator, "]}");
+        } else {
+            // Simple AND-only mode (backward compatible)
+            try buf.appendSlice(allocator, "\"filter\":{");
+            if (self.filters.items.len > 0) {
+                try serializeFilterGroup(allocator, &buf, self.filters.items);
+            }
+            try buf.append(allocator, '}');
+        }
 
         // Projection
         if (self.projection) |proj| {
@@ -306,9 +321,22 @@ pub const QueryAST = struct {
 
         // Order by
         if (self.order_by) |ob| {
-            if (!first) try buf.append(allocator, ',');
-            first = false;
-            try appendFmt(allocator, &buf, "\"orderBy\":{{\"field\":\"{s}\",\"direction\":\"{s}\"}}", .{ ob.field, ob.direction.toString() });
+            if (ob.items.len > 0) {
+                if (!first) try buf.append(allocator, ',');
+                first = false;
+                if (ob.items.len == 1) {
+                    // Single field: backward-compatible object format
+                    try appendFmt(allocator, &buf, "\"orderBy\":{{\"field\":\"{s}\",\"direction\":\"{s}\"}}", .{ ob.items[0].field, ob.items[0].direction.toString() });
+                } else {
+                    // Multi-field: array format
+                    try buf.appendSlice(allocator, "\"orderBy\":[");
+                    for (ob.items, 0..) |spec, i| {
+                        if (i > 0) try buf.append(allocator, ',');
+                        try appendFmt(allocator, &buf, "{{\"field\":\"{s}\",\"direction\":\"{s}\"}}", .{ spec.field, spec.direction.toString() });
+                    }
+                    try buf.append(allocator, ']');
+                }
+            }
         }
 
         // Limit
@@ -409,6 +437,38 @@ fn appendFmt(allocator: Allocator, buf: *ArrayList(u8), comptime fmt: []const u8
     const str = try std.fmt.allocPrint(allocator, fmt, args);
     defer allocator.free(str);
     try buf.appendSlice(allocator, str);
+}
+
+/// Serialize a slice of filters as AND-joined JSON: "field":{"$op":val},"field2":{"$op":val}
+/// Merges multiple operators on the same field into one object.
+fn serializeFilterGroup(allocator: Allocator, buf: *ArrayList(u8), filters: []const FilterExpr) !void {
+    // Collect unique field names in order
+    var field_order: ArrayList([]const u8) = .empty;
+    defer field_order.deinit(allocator);
+    for (filters) |filter| {
+        var found = false;
+        for (field_order.items) |existing| {
+            if (std.mem.eql(u8, existing, filter.field)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) try field_order.append(allocator, filter.field);
+    }
+
+    for (field_order.items, 0..) |field_name, fi| {
+        if (fi > 0) try buf.append(allocator, ',');
+        try appendFmt(allocator, buf, "\"{s}\":{{", .{field_name});
+        var op_first = true;
+        for (filters) |filter| {
+            if (!std.mem.eql(u8, filter.field, field_name)) continue;
+            if (!op_first) try buf.append(allocator, ',');
+            op_first = false;
+            try appendFmt(allocator, buf, "\"{s}\":", .{filter.op.toJsonOp()});
+            try filter.value.formatTo(allocator, buf);
+        }
+        try buf.append(allocator, '}');
+    }
 }
 
 // ============================================================================
