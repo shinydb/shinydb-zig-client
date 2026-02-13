@@ -218,6 +218,13 @@ pub const QueryAST = struct {
     }
 
     pub fn deinit(self: *QueryAST) void {
+        // Free heap-allocated array slices inside filter values (e.g. $in arrays)
+        for (self.filters.items) |filter| {
+            switch (filter.value) {
+                .array => |arr| self.allocator.free(arr),
+                else => {},
+            }
+        }
         self.filters.deinit(self.allocator);
         if (self.projection) |*p| p.deinit(self.allocator);
         if (self.order_by) |*o| o.deinit(self.allocator);
