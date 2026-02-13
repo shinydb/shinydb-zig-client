@@ -57,6 +57,7 @@ pub const Parser = struct {
     /// Parse a complete query
     fn parseQuery(self: *Parser) ParseError!QueryAST {
         var query_ast = QueryAST.init(self.allocator);
+        query_ast.owns_filter_values = true;
         errdefer query_ast.deinit();
 
         // Parse store reference: space.store or just store

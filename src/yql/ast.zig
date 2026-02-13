@@ -210,6 +210,11 @@ pub const QueryAST = struct {
     // Mutation
     mutation: ?Mutation = null,
 
+    // Ownership: true if this AST owns heap-allocated filter values (e.g. $in arrays).
+    // The parser sets this to true. Builder copies (query.where) leave it false
+    // to avoid double-free when both ASTs share the same array pointer.
+    owns_filter_values: bool = false,
+
     pub fn init(allocator: Allocator) QueryAST {
         return .{
             .allocator = allocator,
@@ -219,10 +224,13 @@ pub const QueryAST = struct {
 
     pub fn deinit(self: *QueryAST) void {
         // Free heap-allocated array slices inside filter values (e.g. $in arrays)
-        for (self.filters.items) |filter| {
-            switch (filter.value) {
-                .array => |arr| self.allocator.free(arr),
-                else => {},
+        // Only if this AST owns them (i.e. created by the parser, not copied by builder)
+        if (self.owns_filter_values) {
+            for (self.filters.items) |filter| {
+                switch (filter.value) {
+                    .array => |arr| self.allocator.free(arr),
+                    else => {},
+                }
             }
         }
         self.filters.deinit(self.allocator);
