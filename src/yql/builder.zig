@@ -422,10 +422,18 @@ pub const Query = struct {
     }
 
     fn executeDelete(self: *Query, ns: []const u8) !QueryResponse {
+        // Build query JSON from filters if present (for filter-based delete)
+        const query_json: ?[]const u8 = if (self.ast.filters.items.len > 0)
+            try self.ast.toJson(self.allocator)
+        else
+            null;
+        defer if (query_json) |qj| self.allocator.free(qj);
+
         const op = proto.Operation{
             .Delete = .{
                 .store_ns = ns,
-                .id = null, // Delete by filter
+                .id = null,
+                .query_json = query_json,
             },
         };
 

@@ -1,5 +1,7 @@
 const std = @import("std");
-const milliTimestamp = @import("common.zig").milliTimestamp;
+const common = @import("common.zig");
+const milliTimestamp = common.milliTimestamp;
+const nanoTimestamp = common.nanoTimestamp;
 
 /// Operation types for metrics tracking
 pub const OperationType = enum {
@@ -175,8 +177,8 @@ pub const ClientMetrics = struct {
     // Optional callback
     callback: ?MetricsCallback,
 
-    // Lock for thread safety
-    mutex: std.Thread.Mutex,
+    // Lock for thread safety (spinlock — std.Thread.Mutex removed in Zig 0.16)
+    mutex: std.atomic.Mutex,
 
     pub fn init(allocator: std.mem.Allocator) ClientMetrics {
         return .{
@@ -189,7 +191,7 @@ pub const ClientMetrics = struct {
             .reconnection_count = 0,
             .start_time = milliTimestamp(),
             .callback = null,
-            .mutex = .{},
+            .mutex = .unlocked,
         };
     }
 
@@ -198,16 +200,21 @@ pub const ClientMetrics = struct {
         // Nothing to clean up for now
     }
 
+    /// Spin-lock: blocks until mutex is acquired (std.atomic.Mutex has no blocking lock)
+    fn spinLock(self: *ClientMetrics) void {
+        while (!self.mutex.tryLock()) {}
+    }
+
     /// Set callback for operation metrics
     pub fn setCallback(self: *ClientMetrics, callback: ?MetricsCallback) void {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
         self.callback = callback;
     }
 
     /// Record an operation
     pub fn recordOperation(self: *ClientMetrics, op_type: OperationType, latency_us: u64, result: OperationResult) void {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
 
         self.total_requests += 1;
@@ -221,42 +228,42 @@ pub const ClientMetrics = struct {
 
     /// Record bytes sent
     pub fn recordBytesSent(self: *ClientMetrics, bytes: u64) void {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
         self.total_bytes_sent += bytes;
     }
 
     /// Record bytes received
     pub fn recordBytesReceived(self: *ClientMetrics, bytes: u64) void {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
         self.total_bytes_received += bytes;
     }
 
     /// Record connection event
     pub fn recordConnection(self: *ClientMetrics) void {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
         self.connection_count += 1;
     }
 
     /// Record reconnection event
     pub fn recordReconnection(self: *ClientMetrics) void {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
         self.reconnection_count += 1;
     }
 
     /// Get stats for a specific operation type
     pub fn getStats(self: *ClientMetrics, op_type: OperationType) OperationStats {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
         return self.stats[@intFromEnum(op_type)];
     }
 
     /// Get total throughput (ops/sec)
     pub fn getThroughput(self: *ClientMetrics) f64 {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
 
         const elapsed_ms = milliTimestamp() - self.start_time;
@@ -272,7 +279,7 @@ pub const ClientMetrics = struct {
 
     /// Reset all metrics
     pub fn reset(self: *ClientMetrics) void {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
 
         for (&self.stats) |*stat| {
@@ -298,7 +305,7 @@ pub const ClientMetrics = struct {
     };
 
     pub fn getSnapshot(self: *ClientMetrics) MetricsSnapshot {
-        self.mutex.lock();
+        self.spinLock();
         defer self.mutex.unlock();
 
         const elapsed_ms = milliTimestamp() - self.start_time;
@@ -358,26 +365,26 @@ pub const ClientMetrics = struct {
 
 /// Timer for measuring operation latency
 pub const Timer = struct {
-    started: std.time.Instant,
+    started: i128,
 
     pub fn start() Timer {
         return .{
-            .started = std.time.Instant.now() catch unreachable,
+            .started = nanoTimestamp(),
         };
     }
 
     /// Returns elapsed time in microseconds
     pub fn elapsedUs(self: *const Timer) u64 {
-        const now = std.time.Instant.now() catch return 0;
-        const elapsed_ns = now.since(self.started);
-        return elapsed_ns / 1000;
+        const now = nanoTimestamp();
+        const elapsed_ns = now - self.started;
+        return @intCast(@divTrunc(@max(elapsed_ns, 0), 1000));
     }
 
     /// Returns elapsed time in milliseconds
     pub fn elapsedMs(self: *const Timer) u64 {
-        const now = std.time.Instant.now() catch return 0;
-        const elapsed_ns = now.since(self.started);
-        return elapsed_ns / 1_000_000;
+        const now = nanoTimestamp();
+        const elapsed_ns = now - self.started;
+        return @intCast(@divTrunc(@max(elapsed_ns, 0), 1_000_000));
     }
 };
 

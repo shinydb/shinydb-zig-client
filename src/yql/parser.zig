@@ -544,7 +544,8 @@ pub const Parser = struct {
         const end = self.lexer.pos;
         self.advance(); // consume final }
 
-        return self.lexer.source[start..end];
+        // Return an owned copy so AST.deinit() can safely free it
+        return self.allocator.dupe(u8, self.lexer.source[start..end]) catch return ParseError.OutOfMemory;
     }
 
     // === Helper methods ===
