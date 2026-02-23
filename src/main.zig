@@ -27,7 +27,7 @@ pub fn main() !void {
         return;
     };
     defer client.disconnect();
-    std.debug.print("Connected! Session ID: {}\n\n", .{client.session_id});
+    std.debug.print("Connected!\n\n", .{});
 
     // Authenticate
     std.debug.print("=== Authenticating ===\n", .{});

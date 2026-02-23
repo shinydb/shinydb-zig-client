@@ -53,6 +53,7 @@ pub const setLogLevel = metrics.setLogLevel;
 pub const FieldType = proto.FieldType;
 pub const ValueType = proto.ValueType;
 pub const DocType = proto.DocType;
+pub const StatsTag = proto.StatsTag;
 
 // Re-export entity structs for management API
 pub const Space = proto.Space;

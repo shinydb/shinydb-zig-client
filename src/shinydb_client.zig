@@ -25,7 +25,7 @@ pub const ShinyDbClient = struct {
     allocator: std.mem.Allocator,
     io: Io,
     socket: ?net.Stream,
-    session_id: u32,
+    // auth_token: [32]u8,
     packet_id: u32,
 
     // Connection info (for reconnection)
@@ -49,7 +49,6 @@ pub const ShinyDbClient = struct {
 
     // Pipelining state
     pending_requests: std.ArrayList(PendingRequest),
-    next_correlation_id: u64,
 
     // Reusable resources
     buffer_writer: proto.BufferWriter,
@@ -60,7 +59,6 @@ pub const ShinyDbClient = struct {
     sends_since_flush: u32,
 
     const PendingRequest = struct {
-        correlation_id: u64,
         packet_id: u32,
         timestamp: i64,
     };
@@ -80,7 +78,7 @@ pub const ShinyDbClient = struct {
             .allocator = allocator,
             .io = io,
             .socket = null,
-            .session_id = 0,
+            // .auth_token = [_]u8{0} ** 32,
             .packet_id = 0,
             .host = null,
             .port = 0,
@@ -88,7 +86,6 @@ pub const ShinyDbClient = struct {
             .circuit_breaker = CircuitBreaker.init(5, 2, 30000),
             .timeout_config = TimeoutConfig.default,
             .pending_requests = .empty,
-            .next_correlation_id = 1,
             .buffer_writer = try proto.BufferWriter.init(allocator),
             .recv_buffer = recv_buffer,
             .flush_threshold = flush_threshold,
@@ -134,10 +131,9 @@ pub const ShinyDbClient = struct {
         self.host = try self.allocator.dupe(u8, host);
         self.port = port;
 
-        var prng = std.Random.DefaultPrng.init(@intCast(milliTimestamp()));
-        self.session_id = prng.random().int(u32);
+        // self.auth_token = [_]u8{0} ** 32; // cleared on new connection; set after Authenticate
 
-        self.logInfo("Connected to {s}:{d} (session_id: {x})", .{ host, port, self.session_id });
+        self.logInfo("Connected to {s}:{d}", .{ host, port });
 
         if (self.metrics) |m| {
             m.recordConnection();
@@ -175,7 +171,6 @@ pub const ShinyDbClient = struct {
             self.logWarn("Clearing {d} pending requests due to reconnection", .{pending_count});
         }
         self.pending_requests.clearRetainingCapacity();
-        self.next_correlation_id = 1;
         self.packet_id = 0;
 
         try self.connect(host, port);
@@ -265,16 +260,12 @@ pub const ShinyDbClient = struct {
         const start_time = milliTimestamp();
         const deadline: ?i64 = if (timeout_ms) |t| start_time + @as(i64, t) else null;
 
-        const correlation_id = self.next_correlation_id;
-        self.next_correlation_id += 1;
-
         const packet = Packet{
             .checksum = 0,
             .packet_length = 0,
             .packet_id = self.packet_id,
-            .session_id = self.session_id,
-            .correlation_id = correlation_id,
             .timestamp = milliTimestamp(),
+            // .auth_token = self.auth_token,
             .op = op,
         };
         self.packet_id += 1;
@@ -317,12 +308,11 @@ pub const ShinyDbClient = struct {
         }
 
         try self.pending_requests.append(self.allocator, .{
-            .correlation_id = correlation_id,
             .packet_id = packet.packet_id,
             .timestamp = packet.timestamp,
         });
 
-        return correlation_id;
+        return packet.packet_id;
     }
 
     pub fn receiveAsync(self: *Self) !Packet {
@@ -654,24 +644,16 @@ pub const ShinyDbClient = struct {
         }
     };
 
-    /// Authentication result returned by authenticate/authenticateApiKey
+    /// Authentication result returned by authenticate.
+    /// `token` is the 32-byte session token to be attached to every subsequent request.
     pub const AuthResult = struct {
-        session_id: []const u8,
-        api_key: []const u8,
-        username: []const u8,
-        role: Role,
-        allocator: std.mem.Allocator,
+        token: [32]u8,
 
-        pub fn deinit(self: *AuthResult) void {
-            if (self.session_id.len > 0) self.allocator.free(self.session_id);
-            if (self.api_key.len > 0) self.allocator.free(self.api_key);
-            if (self.username.len > 0) self.allocator.free(self.username);
-        }
+        pub fn deinit(_: *AuthResult) void {}
     };
 
-    /// Authenticate with username and password
-    /// Returns AuthResult with session_id, api_key, and role
-    /// Caller owns returned AuthResult and must call deinit() to free memory
+    /// Authenticate with username and password. Returns AuthResult with session token.
+    /// Caller owns returned AuthResult and must call deinit() to free memory.
     pub fn authenticate(self: *Self, username: []const u8, password: []const u8) !AuthResult {
         const timer = Timer.start();
         errdefer {
@@ -695,53 +677,11 @@ pub const ShinyDbClient = struct {
                     return ClientError.InvalidResponse;
                 }
                 if (reply.data) |data| {
-                    break :blk try parseAuthResult(self.allocator, data);
-                }
-                if (self.metrics) |m| {
-                    m.recordOperation(.authenticate, timer.elapsedUs(), .failure);
-                }
-                return ClientError.InvalidResponse;
-            },
-            else => {
-                if (self.metrics) |m| {
-                    m.recordOperation(.authenticate, timer.elapsedUs(), .failure);
-                }
-                return ClientError.InvalidResponse;
-            },
-        };
-
-        if (self.metrics) |m| {
-            m.recordOperation(.authenticate, timer.elapsedUs(), .success);
-        }
-        return result;
-    }
-
-    /// Authenticate with API key
-    /// Returns AuthResult with session_id, username, and role
-    /// Caller owns returned AuthResult and must call deinit() to free memory
-    pub fn authenticateApiKey(self: *Self, api_key: []const u8) !AuthResult {
-        const timer = Timer.start();
-        errdefer {
-            if (self.metrics) |m| {
-                m.recordOperation(.authenticate, timer.elapsedUs(), .failure);
-            }
-        }
-
-        const packet = try self.doOperation(.{ .AuthenticateApiKey = .{
-            .api_key = api_key,
-        } });
-        defer Packet.free(self.allocator, packet);
-
-        const result = switch (packet.op) {
-            .Reply => |reply| blk: {
-                if (reply.status != .ok) {
-                    if (self.metrics) |m| {
-                        m.recordOperation(.authenticate, timer.elapsedUs(), .failure);
-                    }
-                    return ClientError.InvalidResponse;
-                }
-                if (reply.data) |data| {
-                    break :blk try parseAuthResult(self.allocator, data);
+                    if (data.len != 32) return ClientError.InvalidResponse;
+                    var token: [32]u8 = undefined;
+                    @memcpy(&token, data[0..32]);
+                    // self.auth_token = token;
+                    break :blk AuthResult{ .token = token };
                 }
                 if (self.metrics) |m| {
                     m.recordOperation(.authenticate, timer.elapsedUs(), .failure);
@@ -930,6 +870,73 @@ pub const ShinyDbClient = struct {
             else => return ClientError.InvalidResponse,
         }
     }
+
+    /// Get engine statistics as BSON bytes
+    /// Returns caller-owned BSON data that must be freed with allocator.free()
+    pub fn stats(self: *Self, stat: proto.StatsTag) ![]const u8 {
+        const op = proto.Operation{ .Stats = .{ .stat = stat } };
+
+        const packet = try self.doOperation(op);
+        defer Packet.free(self.allocator, packet);
+
+        switch (packet.op) {
+            .Reply => |reply| {
+                if (reply.status != .ok) {
+                    return ClientError.ServerError;
+                }
+                if (reply.data) |data| {
+                    return try self.allocator.dupe(u8, data);
+                }
+                return ClientError.InvalidResponse;
+            },
+            else => return ClientError.InvalidResponse,
+        }
+    }
+
+    /// Set server operation mode.
+    /// online=true  → normal (online) mode, all operations allowed.
+    /// online=false → offline (maintenance) mode, only admin ops allowed.
+    /// Returns the JSON confirmation: {"mode":"offline","previous":"online"}
+    pub fn setMode(self: *Self, online: bool) ![]const u8 {
+        const op = proto.Operation{ .SetMode = .{ .online = online } };
+
+        const packet = try self.doOperation(op);
+        defer Packet.free(self.allocator, packet);
+
+        switch (packet.op) {
+            .Reply => |reply| {
+                if (reply.status != .ok) {
+                    return ClientError.ServerError;
+                }
+                if (reply.data) |data| {
+                    return try self.allocator.dupe(u8, data);
+                }
+                return ClientError.InvalidResponse;
+            },
+            else => return ClientError.InvalidResponse,
+        }
+    }
+
+    /// List all vlog headers with storage stats
+    pub fn listVlogs(self: *Self) ![]const u8 {
+        const op = proto.Operation.Vlogs;
+
+        const packet = try self.doOperation(op);
+        defer Packet.free(self.allocator, packet);
+
+        switch (packet.op) {
+            .Reply => |reply| {
+                if (reply.status != .ok) {
+                    return ClientError.ServerError;
+                }
+                if (reply.data) |data| {
+                    return try self.allocator.dupe(u8, data);
+                }
+                return ClientError.InvalidResponse;
+            },
+            else => return ClientError.InvalidResponse,
+        }
+    }
 };
 
 /// Parse backup metadata from JSON response
@@ -986,92 +993,11 @@ fn parseBackupMetadata(allocator: std.mem.Allocator, data: []const u8) !ShinyDbC
     };
 }
 
-/// Parse authentication result from JSON response
-fn parseAuthResult(allocator: std.mem.Allocator, data: []const u8) !ShinyDbClient.AuthResult {
-    var result: ShinyDbClient.AuthResult = .{
-        .session_id = &.{},
-        .api_key = &.{},
-        .username = &.{},
-        .role = .none,
-        .allocator = allocator,
-    };
-
-    // Parse session_id
-    if (std.mem.indexOf(u8, data, "\"session_id\":\"")) |start| {
-        const val_start = start + "\"session_id\":\"".len;
-        if (std.mem.indexOfPos(u8, data, val_start, "\"")) |val_end| {
-            result.session_id = try allocator.dupe(u8, data[val_start..val_end]);
-        }
-    }
-
-    // Parse api_key
-    if (std.mem.indexOf(u8, data, "\"api_key\":\"")) |start| {
-        const val_start = start + "\"api_key\":\"".len;
-        if (std.mem.indexOfPos(u8, data, val_start, "\"")) |val_end| {
-            result.api_key = try allocator.dupe(u8, data[val_start..val_end]);
-        }
-    }
-
-    // Parse username
-    if (std.mem.indexOf(u8, data, "\"username\":\"")) |start| {
-        const val_start = start + "\"username\":\"".len;
-        if (std.mem.indexOfPos(u8, data, val_start, "\"")) |val_end| {
-            result.username = try allocator.dupe(u8, data[val_start..val_end]);
-        }
-    }
-
-    // Parse role
-    if (std.mem.indexOf(u8, data, "\"role\":\"")) |start| {
-        const val_start = start + "\"role\":\"".len;
-        if (std.mem.indexOfPos(u8, data, val_start, "\"")) |val_end| {
-            result.role = ShinyDbClient.Role.fromString(data[val_start..val_end]);
-        }
-    }
-
-    return result;
-}
 
 // ============================================================================
 // Unit Tests (inline for non-pub functions)
 // ============================================================================
 
-test "parseAuthResult — valid JSON with all fields" {
-    const allocator = std.testing.allocator;
-    const data = "{\"session_id\":\"sess_abc123\",\"api_key\":\"key_xyz789\",\"username\":\"admin_user\",\"role\":\"admin\"}";
-
-    var result = try parseAuthResult(allocator, data);
-    defer result.deinit();
-
-    try std.testing.expectEqualStrings("sess_abc123", result.session_id);
-    try std.testing.expectEqualStrings("key_xyz789", result.api_key);
-    try std.testing.expectEqualStrings("admin_user", result.username);
-    try std.testing.expectEqual(ShinyDbClient.Role.admin, result.role);
-}
-
-test "parseAuthResult — read_only role" {
-    const allocator = std.testing.allocator;
-    const data = "{\"session_id\":\"s1\",\"api_key\":\"k1\",\"username\":\"viewer\",\"role\":\"read_only\"}";
-
-    var result = try parseAuthResult(allocator, data);
-    defer result.deinit();
-
-    try std.testing.expectEqualStrings("viewer", result.username);
-    try std.testing.expectEqual(ShinyDbClient.Role.read_only, result.role);
-}
-
-test "parseAuthResult — partial JSON (missing fields)" {
-    const allocator = std.testing.allocator;
-    const data = "{\"username\":\"testuser\",\"role\":\"read_write\"}";
-
-    var result = try parseAuthResult(allocator, data);
-    defer result.deinit();
-
-    // session_id and api_key should be empty slices (not allocated)
-    try std.testing.expectEqual(@as(usize, 0), result.session_id.len);
-    try std.testing.expectEqual(@as(usize, 0), result.api_key.len);
-    try std.testing.expectEqualStrings("testuser", result.username);
-    try std.testing.expectEqual(ShinyDbClient.Role.read_write, result.role);
-}
 
 test "parseBackupMetadata — valid JSON" {
     const allocator = std.testing.allocator;

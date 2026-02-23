@@ -79,9 +79,7 @@ test "integration: authenticate with admin credentials" {
     var auth = try client.authenticate("admin", "admin");
     defer auth.deinit();
 
-    try testing.expectEqual(ShinyDbClient.Role.admin, auth.role);
-    try testing.expect(auth.session_id.len > 0);
-    std.debug.print("[OK] Authenticated as admin (session: {s})\n", .{auth.session_id});
+    std.debug.print("[OK] Authenticated as admin (token: {x})\n", .{std.fmt.fmtSliceHexLower(&auth.token)});
 }
 
 // ============================================================================
