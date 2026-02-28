@@ -442,6 +442,14 @@ pub const Query = struct {
 
         return switch (packet.op) {
             .Reply => |reply| blk: {
+                if (reply.status == .not_found) {
+                    // Document didn't exist — idempotent delete, not an error
+                    break :blk QueryResponse{
+                        .success = true,
+                        .data = null,
+                        .count = 0,
+                    };
+                }
                 if (reply.status != .ok) {
                     return error.DeleteFailed;
                 }

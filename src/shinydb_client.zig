@@ -893,6 +893,72 @@ pub const ShinyDbClient = struct {
         }
     }
 
+    /// Garbage Collect the Value Log by id
+    /// Returns result of Garbage Collection
+    pub fn collect(self: *Self, vlog_id: u8) ![]const u8 {
+        const op = proto.Operation{ .Collect = .{ .vlog = vlog_id } };
+
+        const packet = try self.doOperation(op);
+        defer Packet.free(self.allocator, packet);
+
+        switch (packet.op) {
+            .Reply => |reply| {
+                if (reply.status != .ok) {
+                    return ClientError.ServerError;
+                }
+                if (reply.data) |data| {
+                    return try self.allocator.dupe(u8, data);
+                }
+                return ClientError.InvalidResponse;
+            },
+            else => return ClientError.InvalidResponse,
+        }
+    }
+
+    /// Backup Database, Indexes, Value Logs and Config
+    /// Returns result of Backup
+    pub fn backup(self: *Self, path: []const u8) ![]const u8 {
+        const op = proto.Operation{ .Backup = .{ .path = path } };
+
+        const packet = try self.doOperation(op);
+        defer Packet.free(self.allocator, packet);
+
+        switch (packet.op) {
+            .Reply => |reply| {
+                if (reply.status != .ok) {
+                    return ClientError.ServerError;
+                }
+                if (reply.data) |data| {
+                    return try self.allocator.dupe(u8, data);
+                }
+                return ClientError.InvalidResponse;
+            },
+            else => return ClientError.InvalidResponse,
+        }
+    }
+
+    /// Restore Database, Indexes, Value Logs and Config
+    /// Returns result of Restore
+    pub fn restore(self: *Self, backup_path: []const u8, target_path: []const u8) ![]const u8 {
+        const op = proto.Operation{ .Restore = .{ .backup_path = backup_path, .target_path = target_path } };
+
+        const packet = try self.doOperation(op);
+        defer Packet.free(self.allocator, packet);
+
+        switch (packet.op) {
+            .Reply => |reply| {
+                if (reply.status != .ok) {
+                    return ClientError.ServerError;
+                }
+                if (reply.data) |data| {
+                    return try self.allocator.dupe(u8, data);
+                }
+                return ClientError.InvalidResponse;
+            },
+            else => return ClientError.InvalidResponse,
+        }
+    }
+
     /// Set server operation mode.
     /// online=true  → normal (online) mode, all operations allowed.
     /// online=false → offline (maintenance) mode, only admin ops allowed.
@@ -993,11 +1059,9 @@ fn parseBackupMetadata(allocator: std.mem.Allocator, data: []const u8) !ShinyDbC
     };
 }
 
-
 // ============================================================================
 // Unit Tests (inline for non-pub functions)
 // ============================================================================
-
 
 test "parseBackupMetadata — valid JSON" {
     const allocator = std.testing.allocator;
