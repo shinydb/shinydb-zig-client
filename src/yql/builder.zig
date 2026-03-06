@@ -199,6 +199,11 @@ pub const Query = struct {
         return self;
     }
 
+    pub fn after(self: *Query, cursor: []const u8) *Query {
+        self.ast.after_val = cursor;
+        return self;
+    }
+
     pub fn select(self: *Query, fields: []const []const u8) *Query {
         var proj = ArrayList([]const u8).empty;
         for (fields) |f| {
@@ -339,8 +344,13 @@ pub const Query = struct {
         return switch (packet.op) {
             .Reply => |reply| blk: {
                 if (reply.status != .ok) {
+                    const err_msg = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
                     proto.Packet.free(self.allocator, packet);
-                    return error.OperationFailed;
+                    break :blk QueryResponse{
+                        .success = false,
+                        .error_message = err_msg,
+                        .allocator = self.allocator,
+                    };
                 }
                 // Dupe data before freeing packet (reply.data is a slice into packet memory)
                 const duped = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
@@ -409,7 +419,12 @@ pub const Query = struct {
         return switch (packet.op) {
             .Reply => |reply| blk: {
                 if (reply.status != .ok) {
-                    return error.UpdateFailed;
+                    const err_msg = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
+                    break :blk QueryResponse{
+                        .success = false,
+                        .error_message = err_msg,
+                        .allocator = self.allocator,
+                    };
                 }
                 break :blk QueryResponse{
                     .success = true,
@@ -451,7 +466,12 @@ pub const Query = struct {
                     };
                 }
                 if (reply.status != .ok) {
-                    return error.DeleteFailed;
+                    const err_msg = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
+                    break :blk QueryResponse{
+                        .success = false,
+                        .error_message = err_msg,
+                        .allocator = self.allocator,
+                    };
                 }
                 break :blk QueryResponse{
                     .success = true,
@@ -481,8 +501,13 @@ pub const Query = struct {
         return switch (packet.op) {
             .Reply => |reply| blk: {
                 if (reply.status != .ok) {
+                    const err_msg = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
                     proto.Packet.free(self.allocator, packet);
-                    return error.QueryFailed;
+                    break :blk QueryResponse{
+                        .success = false,
+                        .error_message = err_msg,
+                        .allocator = self.allocator,
+                    };
                 }
                 // Dupe data before freeing packet (reply.data is a slice into packet memory)
                 const duped = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
@@ -519,8 +544,13 @@ pub const Query = struct {
         return switch (packet.op) {
             .Reply => |reply| blk: {
                 if (reply.status != .ok) {
+                    const err_msg = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
                     proto.Packet.free(self.allocator, packet);
-                    return error.AggregateFailed;
+                    break :blk QueryResponse{
+                        .success = false,
+                        .error_message = err_msg,
+                        .allocator = self.allocator,
+                    };
                 }
                 // Dupe data before freeing packet (reply.data is a slice into packet memory)
                 const duped = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
@@ -558,8 +588,13 @@ pub const Query = struct {
         return switch (packet.op) {
             .Reply => |reply| blk: {
                 if (reply.status != .ok) {
+                    const err_msg = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
                     proto.Packet.free(self.allocator, packet);
-                    return error.ScanFailed;
+                    break :blk QueryResponse{
+                        .success = false,
+                        .error_message = err_msg,
+                        .allocator = self.allocator,
+                    };
                 }
                 // Dupe data before freeing packet (reply.data is a slice into packet memory)
                 const duped = if (reply.data) |d| try self.allocator.dupe(u8, d) else null;
@@ -588,6 +623,7 @@ pub const Query = struct {
 pub const QueryResponse = struct {
     success: bool,
     data: ?[]const u8 = null,
+    error_message: ?[]const u8 = null,
     count: usize = 0,
     allocator: ?Allocator = null,
 
@@ -595,6 +631,11 @@ pub const QueryResponse = struct {
         if (self.data) |d| {
             if (self.allocator) |alloc| {
                 alloc.free(d);
+            }
+        }
+        if (self.error_message) |m| {
+            if (self.allocator) |alloc| {
+                alloc.free(m);
             }
         }
     }

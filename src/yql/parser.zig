@@ -151,6 +151,8 @@ pub const Parser = struct {
             try self.parseCountOp(query_ast);
         } else if (std.mem.eql(u8, op_name, "get")) {
             try self.parseGetOp(query_ast);
+        } else if (std.mem.eql(u8, op_name, "after")) {
+            try self.parseAfterOp(query_ast);
         } else {
             return ParseError.UnknownOperation;
         }
@@ -397,6 +399,18 @@ pub const Parser = struct {
         query_ast.skip_val = n;
     }
 
+    fn parseAfterOp(self: *Parser, query_ast: *QueryAST) ParseError!void {
+        try self.expectToken(.lparen);
+
+        const str_token = self.current;
+        if (str_token.type != .string) return ParseError.ExpectedValue;
+        self.advance();
+
+        try self.expectToken(.rparen);
+
+        query_ast.after_val = str_token.text;
+    }
+
     fn parseGroupByOp(self: *Parser, query_ast: *QueryAST) ParseError!void {
         try self.expectToken(.lparen);
 
@@ -585,7 +599,7 @@ fn isOperation(name: []const u8) bool {
     const ops = [_][]const u8{
         "filter",  "pluck",     "orderBy", "limit", "skip",
         "groupBy", "aggregate", "insert",  "set",   "delete",
-        "count",   "get",       "exists",
+        "count",   "get",       "exists",  "after",
     };
     for (ops) |op| {
         if (std.mem.eql(u8, name, op)) return true;

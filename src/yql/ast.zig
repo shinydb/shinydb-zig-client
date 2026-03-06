@@ -204,6 +204,7 @@ pub const QueryAST = struct {
     order_by: ?ArrayList(OrderByExpr) = null,
     limit_val: ?u32 = null,
     skip_val: ?u32 = null,
+    after_val: ?[]const u8 = null, // cursor: hex-encoded key for pagination
     group_by: ?ArrayList([]const u8) = null,
     aggregations: ?ArrayList(AggregationExpr) = null,
 
@@ -366,6 +367,15 @@ pub const QueryAST = struct {
             if (!first) try buf.append(allocator, ',');
             first = false;
             try appendFmt(allocator, &buf, "\"skip\":{d}", .{sk});
+        }
+
+        // Cursor (after)
+        if (self.after_val) |av| {
+            if (!first) try buf.append(allocator, ',');
+            first = false;
+            try buf.appendSlice(allocator, "\"after\":\"");
+            try buf.appendSlice(allocator, av);
+            try buf.append(allocator, '"');
         }
 
         // Group by
