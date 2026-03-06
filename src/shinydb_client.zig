@@ -351,7 +351,7 @@ pub const ShinyDbClient = struct {
 
         const msg_len = std.mem.readInt(u32, &resp_length_buf, .little);
 
-        if (msg_len > 16 * 1024 * 1024) {
+        if (msg_len > 256 * 1024 * 1024) { // 256 MB max response
             return ClientError.InvalidResponse;
         }
 
@@ -376,6 +376,11 @@ pub const ShinyDbClient = struct {
 
         const packet = try Packet.deserialize(self.allocator, payload);
         _ = self.pending_requests.orderedRemove(0);
+
+        // Shrink recv_buffer back if it grew beyond 64KB
+        if (self.recv_buffer.items.len > 64 * 1024) {
+            self.recv_buffer.shrinkAndFree(self.allocator, 64 * 1024);
+        }
 
         return packet;
     }

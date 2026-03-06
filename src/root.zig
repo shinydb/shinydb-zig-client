@@ -3,6 +3,7 @@ const Io = std.Io;
 const net = Io.net;
 const Allocator = std.mem.Allocator;
 pub const proto = @import("proto");
+pub const bson = @import("bson");
 const Operation = proto.Operation;
 const Packet = proto.Packet;
 const Status = proto.Status;
