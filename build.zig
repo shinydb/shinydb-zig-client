@@ -9,14 +9,23 @@ pub fn build(b: *std.Build) void {
    
     const proto = b.dependency("proto", .{});
     const bson = b.dependency("bson", .{});
+    const utils = b.dependency("utils", .{});
+    const utils_mod = utils.module("utils");
+    const tls = b.dependency("tls", .{});
 
-  
+    // proto's exported module does not include utils to avoid diamond deps;
+    // we inject our single utils instance here.
+    const proto_mod = proto.module("proto");
+    proto_mod.addImport("utils", utils_mod);
+
     const mod = b.addModule("shinydb_zig_client", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .imports = &.{
-            .{ .name = "proto", .module = proto.module("proto") },
+            .{ .name = "proto", .module = proto_mod },
             .{ .name = "bson", .module = bson.module("bson") },
+            .{ .name = "utils", .module = utils_mod },
+            .{ .name = "tls", .module = tls.module("tls") },
         },
     });
 
@@ -99,11 +108,24 @@ pub fn build(b: *std.Build) void {
     });
     const run_client_tests = b.addRunArtifact(client_tests);
 
+    const schema_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/schema_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "shinydb_zig_client", .module = mod },
+            },
+        }),
+    });
+    const run_schema_tests = b.addRunArtifact(schema_tests);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_builder_tests.step);
     test_step.dependOn(&run_client_tests.step);
+    test_step.dependOn(&run_schema_tests.step);
 
     
     const integration_step = b.step("test-integration", "Run integration tests (requires running server)");

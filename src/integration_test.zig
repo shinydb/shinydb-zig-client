@@ -71,12 +71,11 @@ test "integration: authenticate with admin credentials" {
     };
     defer client.deinit();
 
-    client.connect("127.0.0.1", 23469) catch {
+    const conn_str = "127.0.0.1:23469;uid=admin;key=NH8ohl2LHDT8xSJbHGPAsCluCh5pe8Ldn+hckcJovXk=;tls=true";
+    var auth = client.connect(conn_str) catch {
         std.debug.print("[SKIP] Server not available for auth test\n", .{});
         return;
     };
-
-    var auth = try client.authenticate("admin", "admin");
     defer auth.deinit();
 
     std.debug.print("[OK] Authenticated as admin (token: {x})\n", .{std.fmt.fmtSliceHexLower(&auth.token)});

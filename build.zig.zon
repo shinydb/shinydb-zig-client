@@ -13,6 +13,9 @@
         .tls = .{
             .path = "../tls",
         },
+        .utils = .{
+            .path = "../utils",
+        },
     },
     .paths = .{
         "build.zig",

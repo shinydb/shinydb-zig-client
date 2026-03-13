@@ -167,8 +167,8 @@ test "orderBy ascending — ProductName asc" {
         .orderBy("ProductName", .asc);
 
     try testing.expect(q.ast.order_by != null);
-    try testing.expectEqualStrings("ProductName", q.ast.order_by.?.field);
-    try testing.expectEqual(OrderDir.asc, q.ast.order_by.?.direction);
+    try testing.expectEqualStrings("ProductName", q.ast.order_by.?.items[0].field);
+    try testing.expectEqual(OrderDir.asc, q.ast.order_by.?.items[0].direction);
 }
 
 test "orderBy descending — ListPrice desc" {
@@ -178,8 +178,8 @@ test "orderBy descending — ListPrice desc" {
     _ = q.space("adventureworks").store("products")
         .orderBy("ListPrice", .desc);
 
-    try testing.expectEqualStrings("ListPrice", q.ast.order_by.?.field);
-    try testing.expectEqual(OrderDir.desc, q.ast.order_by.?.direction);
+    try testing.expectEqualStrings("ListPrice", q.ast.order_by.?.items[0].field);
+    try testing.expectEqual(OrderDir.desc, q.ast.order_by.?.items[0].direction);
 }
 
 test "limit" {
@@ -350,8 +350,8 @@ test "full query chain — products filtered, ordered, paginated" {
     try testing.expectEqualStrings("adventureworks", q.space_name.?);
     try testing.expectEqualStrings("products", q.store_name.?);
     try testing.expectEqual(@as(usize, 2), q.ast.filters.items.len);
-    try testing.expectEqualStrings("ListPrice", q.ast.order_by.?.field);
-    try testing.expectEqual(OrderDir.desc, q.ast.order_by.?.direction);
+    try testing.expectEqualStrings("ListPrice", q.ast.order_by.?.items[0].field);
+    try testing.expectEqual(OrderDir.desc, q.ast.order_by.?.items[0].direction);
     try testing.expectEqual(@as(u32, 10), q.ast.limit_val.?);
     try testing.expectEqual(@as(u32, 0), q.ast.skip_val.?);
     try testing.expectEqual(@as(usize, 3), q.ast.projection.?.items.len);

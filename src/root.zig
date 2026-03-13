@@ -7,10 +7,7 @@ pub const bson = @import("bson");
 const Operation = proto.Operation;
 const Packet = proto.Packet;
 const Status = proto.Status;
-const BufferWriter = proto.BufferWriter;
 const Attribute = proto.Attribute;
-const common = @import("common.zig");
-const milliTimestamp = common.milliTimestamp;
 
 pub const ClientError = error{
     ConnectionFailed,
@@ -39,17 +36,6 @@ const Response = struct {
 // Re-export hierarchical client API
 pub const ShinyDbClient = @import("shinydb_client.zig").ShinyDbClient;
 
-// Re-export metrics module
-pub const metrics = @import("metrics.zig");
-pub const ClientMetrics = metrics.ClientMetrics;
-pub const OperationType = metrics.OperationType;
-pub const OperationResult = metrics.OperationResult;
-pub const OperationStats = metrics.OperationStats;
-pub const Timer = metrics.Timer;
-pub const Logger = metrics.Logger;
-pub const LogLevel = metrics.LogLevel;
-pub const setLogLevel = metrics.setLogLevel;
-
 // Re-export proto types for convenience
 pub const FieldType = proto.FieldType;
 pub const ValueType = proto.ValueType;
@@ -74,3 +60,11 @@ pub const yql = @import("yql/mod.zig");
 pub const ast = @import("yql/ast.zig");
 pub const Query = @import("yql/builder.zig").Query;
 pub const QueryResponse = @import("yql/builder.zig").QueryResponse;
+
+// Schema validation
+pub const schema = @import("schema.zig");
+pub const Schema = schema.Schema;
+pub const SchemaFieldType = schema.FieldType;
+pub const FieldRule = schema.FieldRule;
+pub const ValidationError = schema.ValidationError;
+pub const FieldError = schema.FieldError;

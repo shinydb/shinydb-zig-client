@@ -21,19 +21,15 @@ pub fn main() !void {
 
     // Connect to shinydb server
     std.debug.print("Connecting to shinydb server at 127.0.0.1:23469...\n", .{});
-    client.connect("127.0.0.1", 23469) catch |err| {
+    const conn_str = "127.0.0.1:23469;uid=admin;key=NH8ohl2LHDT8xSJbHGPAsCluCh5pe8Ldn+hckcJovXk=;tls=true";
+    var auth_result = client.connect(conn_str) catch |err| {
         std.debug.print("Failed to connect: {}\n", .{err});
         std.debug.print("Make sure shinydb server is running on port 23469\n", .{});
         return;
     };
+    auth_result.deinit();
     defer client.disconnect();
-    std.debug.print("Connected!\n\n", .{});
-
-    // Authenticate
-    std.debug.print("=== Authenticating ===\n", .{});
-    var auth_result = try client.authenticate("admin", "admin");
-    defer auth_result.deinit();
-    std.debug.print("✓ Authenticated successfully\n\n", .{});
+    std.debug.print("✓ Connected and authenticated\n\n", .{});
 
     // Example 1: Create a space using unified API
     std.debug.print("=== Example 1: Create Space ===\n", .{});
